@@ -63,4 +63,4 @@ Files that don't match this pattern are skipped.
 
 ## License
 
-MIT
+Apache License 2.0

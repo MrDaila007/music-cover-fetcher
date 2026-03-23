@@ -3,7 +3,7 @@ name = "music-cover-fetcher"
 version = "0.1.0"
 description = "Fetch and embed album cover art for music files using iTunes Search API"
 requires-python = ">=3.10"
-license = "MIT"
+license = "Apache-2.0"
 dependencies = [
     "requests>=2.28.0",
     "mediafile>=0.12.0",
