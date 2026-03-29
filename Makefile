@@ -6,7 +6,7 @@ SRC = music_cover_fetcher.py
 # Default music directory (override: make tag MUSIC=C:\path\to\music)
 MUSIC ?= $(USERPROFILE)/Music
 
-.PHONY: setup install run tag interactive dry-run strip-covers clean help
+.PHONY: setup install run tag interactive dry-run strip-covers lint format clean help
 
 help: ## Show this help
 	@echo Usage: make [target] [MUSIC=path]
@@ -36,6 +36,13 @@ dry-run: ## Preview changes: make dry-run MUSIC=path
 
 strip-covers: ## Remove all cover art: make strip-covers MUSIC=path
 	$(PYTHON) $(SRC) "$(MUSIC)" --strip-covers
+
+lint: ## Run linter and format check
+	$(PYTHON) -m ruff check $(SRC)
+	$(PYTHON) -m ruff format --check $(SRC)
+
+format: ## Auto-format code
+	$(PYTHON) -m ruff format $(SRC)
 
 clean: ## Remove venv and cache files
 	if exist $(VENV) rmdir /s /q $(VENV)

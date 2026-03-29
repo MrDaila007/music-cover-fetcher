@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install ruff mypy types-requests
+
+      - name: Ruff lint
+        run: ruff check music_cover_fetcher.py
+
+      - name: Ruff format check
+        run: ruff format --check music_cover_fetcher.py
+
+      - name: Mypy type check
+        run: mypy music_cover_fetcher.py --ignore-missing-imports
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+
+      - name: Smoke test - help
+        run: python music_cover_fetcher.py --help
+
+      - name: Smoke test - dry run on empty dir
+        run: |
+          mkdir test_music
+          python music_cover_fetcher.py test_music --dry-run
+          python music_cover_fetcher.py test_music --tag --dry-run
+
+      - name: Smoke test - import
+        run: python -c "from music_cover_fetcher import main, parse_filename, build_search_queries, compute_changes; print('All imports OK')"

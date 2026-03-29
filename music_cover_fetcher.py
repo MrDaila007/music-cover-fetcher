@@ -26,8 +26,19 @@ MIN_IMAGE_SIZE = 1000  # bytes
 
 # Metadata fields we work with (must match MediaFile attribute names)
 META_FIELDS = [
-    "title", "artist", "album", "albumartist", "genre", "year",
-    "track", "tracktotal", "disc", "disctotal", "bpm", "isrc", "label",
+    "title",
+    "artist",
+    "album",
+    "albumartist",
+    "genre",
+    "year",
+    "track",
+    "tracktotal",
+    "disc",
+    "disctotal",
+    "bpm",
+    "isrc",
+    "label",
 ]
 
 # ---------------------------------------------------------------------------
@@ -74,6 +85,7 @@ def bold(text: str) -> str:
 # Filename parsing
 # ---------------------------------------------------------------------------
 
+
 def normalize_text(text: str) -> str:
     """Normalize unicode characters for better search matching."""
     text = unicodedata.normalize("NFKD", text)
@@ -118,6 +130,7 @@ def build_search_queries(artist: str, title: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 # Metadata sources — each returns dict | None
 # ---------------------------------------------------------------------------
+
 
 def _match_score(artist: str, title: str, r_artist: str, r_title: str) -> int:
     """Score how well a result matches the query. Higher is better."""
@@ -336,7 +349,10 @@ SOURCES = [
 
 
 def search_all_sources(
-    artist: str, title: str, resolution: int = 600, metadata_mode: bool = False,
+    artist: str,
+    title: str,
+    resolution: int = 600,
+    metadata_mode: bool = False,
 ) -> dict | None:
     """Try all sources with multiple query variations.
 
@@ -372,6 +388,7 @@ def search_all_sources(
 # ---------------------------------------------------------------------------
 # File metadata operations
 # ---------------------------------------------------------------------------
+
 
 def read_file_metadata(filepath: str) -> dict:
     """Read current metadata from audio file."""
@@ -421,12 +438,14 @@ def compute_changes(existing: dict, fetched: dict, force: bool = False) -> list[
             action = "match"
         else:
             action = "overwrite"
-        changes.append({
-            "field": field,
-            "current": current,
-            "proposed": proposed,
-            "action": action,
-        })
+        changes.append(
+            {
+                "field": field,
+                "current": current,
+                "proposed": proposed,
+                "action": action,
+            }
+        )
 
     # Cover art as a special entry
     has_art = existing.get("has_art", False)
@@ -439,12 +458,14 @@ def compute_changes(existing: dict, fetched: dict, force: bool = False) -> list[
         art_action = "overwrite"
     else:
         art_action = "match"
-    changes.append({
-        "field": "cover_art",
-        "current": "yes" if has_art else None,
-        "proposed": "available" if has_cover_url else None,
-        "action": art_action,
-    })
+    changes.append(
+        {
+            "field": "cover_art",
+            "current": "yes" if has_art else None,
+            "proposed": "available" if has_cover_url else None,
+            "action": art_action,
+        }
+    )
 
     return changes
 
@@ -633,15 +654,11 @@ def update_cache(
 
     # Store current file metadata for future comparison
     if file_metadata:
-        entry["file_metadata"] = {
-            f: file_metadata.get(f) for f in META_FIELDS
-        }
+        entry["file_metadata"] = {f: file_metadata.get(f) for f in META_FIELDS}
 
     # Store what the API returned
     if fetched:
-        entry["fetched_metadata"] = {
-            f: fetched.get(f) for f in META_FIELDS
-        }
+        entry["fetched_metadata"] = {f: fetched.get(f) for f in META_FIELDS}
 
     cache[key] = entry
 
@@ -793,31 +810,34 @@ def _select_fields(actionable: list[dict]) -> list[dict] | str:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Fetch and embed album cover art and metadata for music files."
-    )
+    parser = argparse.ArgumentParser(description="Fetch and embed album cover art and metadata for music files.")
     parser.add_argument(
         "directory",
         help="Path to directory containing music files",
     )
     parser.add_argument(
-        "-n", "--dry-run",
+        "-n",
+        "--dry-run",
         action="store_true",
         help="Show what would be done without downloading or embedding",
     )
     parser.add_argument(
-        "-f", "--force",
+        "-f",
+        "--force",
         action="store_true",
         help="Re-fetch/overwrite even if data already exists",
     )
     parser.add_argument(
-        "-r", "--recursive",
+        "-r",
+        "--recursive",
         action="store_true",
         help="Search for music files recursively in subdirectories",
     )
     parser.add_argument(
-        "-s", "--save-covers",
+        "-s",
+        "--save-covers",
         metavar="DIR",
         help="Also save cover images to this directory",
     )
@@ -838,7 +858,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Enable metadata tagging (fill empty fields from API data)",
     )
     parser.add_argument(
-        "-i", "--interactive",
+        "-i",
+        "--interactive",
         action="store_true",
         help="Interactive mode: review and confirm each change (implies --tag)",
     )
@@ -925,12 +946,16 @@ def _run_strip_covers(args: argparse.Namespace, audio_files: list[str]) -> int:
     print(f"{red(f'WARNING: This will remove cover art from {len(with_art)} file(s).')}\n")
 
     # Confirmation 1
-    if not _confirm_strip(f"  [{bold('1/3')}] Remove cover art from {len(with_art)} files? Type {bold('yes')} to continue: "):
+    if not _confirm_strip(
+        f"  [{bold('1/3')}] Remove cover art from {len(with_art)} files? Type {bold('yes')} to continue: "
+    ):
         print("Aborted.")
         return 0
 
     # Confirmation 2
-    if not _confirm_strip(f"  [{bold('2/3')}] This action is irreversible. Are you sure? Type {bold('yes')} to continue: "):
+    if not _confirm_strip(
+        f"  [{bold('2/3')}] This action is irreversible. Are you sure? Type {bold('yes')} to continue: "
+    ):
         print("Aborted.")
         return 0
 
@@ -955,7 +980,7 @@ def _run_strip_covers(args: argparse.Namespace, audio_files: list[str]) -> int:
             print(f"  [{i}/{len(with_art)}] {red('ERROR')} {name}: {e}")
             errors += 1
 
-    print(f"\n=== DONE ===")
+    print("\n=== DONE ===")
     print(f"  Removed: {removed}")
     print(f"  Errors:  {errors}")
     print(f"  Total:   {len(with_art)}")
@@ -1036,8 +1061,7 @@ def _run_cover_only_mode(args: argparse.Namespace, audio_files: list[str]) -> in
 def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
     """Metadata tagging workflow (interactive or auto)."""
     total = len(audio_files)
-    stats = {"tagged": 0, "skipped": 0, "not_found": 0, "errors": 0, "unchanged": 0,
-             "cached": 0}
+    stats = {"tagged": 0, "skipped": 0, "not_found": 0, "errors": 0, "unchanged": 0, "cached": 0}
     source_counts: dict[str, int] = {}
     interactive = args.interactive
     report: list[dict] = []  # Collected for report generation
@@ -1060,11 +1084,13 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         if not parsed:
             print(f"[{i}/{total}] SKIP (can't parse): {os.path.basename(filepath)}")
             stats["skipped"] += 1
-            report.append({
-                "file": os.path.basename(filepath),
-                "status": "skipped",
-                "reason": "can't parse filename",
-            })
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "status": "skipped",
+                    "reason": "can't parse filename",
+                }
+            )
             continue
 
         artist, title = parsed
@@ -1080,20 +1106,26 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             if empty_fields:
                 print(f"  Empty: {', '.join(empty_fields)}")
                 stats["tagged"] += 1
-                report.append({
-                    "file": os.path.basename(filepath),
-                    "artist": artist, "title": title,
-                    "status": "needs_fill",
-                    "empty_fields": empty_fields,
-                })
+                report.append(
+                    {
+                        "file": os.path.basename(filepath),
+                        "artist": artist,
+                        "title": title,
+                        "status": "needs_fill",
+                        "empty_fields": empty_fields,
+                    }
+                )
             else:
                 print(f"  {dim('All fields populated')}")
                 stats["unchanged"] += 1
-                report.append({
-                    "file": os.path.basename(filepath),
-                    "artist": artist, "title": title,
-                    "status": "complete",
-                })
+                report.append(
+                    {
+                        "file": os.path.basename(filepath),
+                        "artist": artist,
+                        "title": title,
+                        "status": "complete",
+                    }
+                )
             continue
 
         # Search for metadata
@@ -1103,11 +1135,14 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             stats["not_found"] += 1
             if use_cache:
                 update_cache(cache, filepath, "not_found", file_metadata=existing)
-            report.append({
-                "file": os.path.basename(filepath),
-                "artist": artist, "title": title,
-                "status": "not_found",
-            })
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "artist": artist,
+                    "title": title,
+                    "status": "not_found",
+                }
+            )
             continue
 
         source_name = result.get("_source", "?")
@@ -1116,23 +1151,23 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         changes = compute_changes(existing, result, force=args.force)
 
         # Filter to actionable changes
-        actionable = [
-            c for c in changes
-            if c["action"] == "fill" or (c["action"] == "overwrite" and args.force)
-        ]
+        actionable = [c for c in changes if c["action"] == "fill" or (c["action"] == "overwrite" and args.force)]
 
         if not actionable:
             print(f"  {dim('Nothing to update')} ({source_name})")
             stats["unchanged"] += 1
             if use_cache:
-                update_cache(cache, filepath, "unchanged", source_name,
-                             fetched=result, file_metadata=existing)
-            report.append({
-                "file": os.path.basename(filepath),
-                "artist": artist, "title": title,
-                "status": "unchanged", "source": source_name,
-                "changes": changes,
-            })
+                update_cache(cache, filepath, "unchanged", source_name, fetched=result, file_metadata=existing)
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "artist": artist,
+                    "title": title,
+                    "status": "unchanged",
+                    "source": source_name,
+                    "changes": changes,
+                }
+            )
             continue
 
         if interactive:
@@ -1148,12 +1183,17 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             elif decision == "skip" or not decision:
                 print(f"  {dim('Skipped')}")
                 stats["skipped"] += 1
-                report.append({
-                    "file": os.path.basename(filepath),
-                    "artist": artist, "title": title,
-                    "status": "skipped", "reason": "user skipped",
-                    "source": source_name, "changes": changes,
-                })
+                report.append(
+                    {
+                        "file": os.path.basename(filepath),
+                        "artist": artist,
+                        "title": title,
+                        "status": "skipped",
+                        "reason": "user skipped",
+                        "source": source_name,
+                        "changes": changes,
+                    }
+                )
                 continue
             else:
                 to_apply = decision
@@ -1180,12 +1220,16 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
 
         if not meta_changes and not art_data:
             stats["unchanged"] += 1
-            report.append({
-                "file": os.path.basename(filepath),
-                "artist": artist, "title": title,
-                "status": "unchanged", "source": source_name,
-                "changes": changes,
-            })
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "artist": artist,
+                    "title": title,
+                    "status": "unchanged",
+                    "source": source_name,
+                    "changes": changes,
+                }
+            )
             continue
 
         if args.save_covers and art_data:
@@ -1202,25 +1246,32 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             if use_cache:
                 # Re-read metadata after save so fingerprint and values reflect new state
                 updated_meta = read_file_metadata(filepath)
-                update_cache(cache, filepath, "tagged", source_name,
-                             fetched=result, file_metadata=updated_meta)
-            report.append({
-                "file": os.path.basename(filepath),
-                "artist": artist, "title": title,
-                "status": "tagged", "source": source_name,
-                "applied": [
-                    {"field": c["field"], "action": c["action"],
-                     "old": c.get("current"), "new": c["proposed"]}
-                    for c in meta_changes
-                ] + ([{"field": "cover_art", "action": "fill"}] if art_data else []),
-            })
+                update_cache(cache, filepath, "tagged", source_name, fetched=result, file_metadata=updated_meta)
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "artist": artist,
+                    "title": title,
+                    "status": "tagged",
+                    "source": source_name,
+                    "applied": [
+                        {"field": c["field"], "action": c["action"], "old": c.get("current"), "new": c["proposed"]}
+                        for c in meta_changes
+                    ]
+                    + ([{"field": "cover_art", "action": "fill"}] if art_data else []),
+                }
+            )
         else:
             stats["errors"] += 1
-            report.append({
-                "file": os.path.basename(filepath),
-                "artist": artist, "title": title,
-                "status": "error", "source": source_name,
-            })
+            report.append(
+                {
+                    "file": os.path.basename(filepath),
+                    "artist": artist,
+                    "title": title,
+                    "status": "error",
+                    "source": source_name,
+                }
+            )
 
     # Save cache
     if use_cache and cache:
