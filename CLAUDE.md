@@ -23,6 +23,12 @@ python music_cover_fetcher.py /path/to/music -i --force
 
 # Dry run, recursive, limit sources
 python music_cover_fetcher.py /path/to/music --tag --dry-run --recursive --sources deezer,itunes
+
+# Ignore cache, re-process everything
+python music_cover_fetcher.py /path/to/music --tag --no-cache
+
+# Remove all embedded cover art (triple confirmation)
+python music_cover_fetcher.py /path/to/music --strip-covers
 ```
 
 ## Dependencies
@@ -43,8 +49,10 @@ Everything lives in `music_cover_fetcher.py`. Key structure:
 - **`_match_score()`**: shared artist/title fuzzy matching used by all source functions to rank API results.
 - **Metadata operations**: `read_file_metadata()` reads current tags, `compute_changes()` diffs existing vs fetched (fill/overwrite/match/skip), `apply_metadata()` writes changes via MediaFile.
 - **Interactive UI**: `show_interactive_review()` displays a colored diff table with Y/n/s(elect)/a(uto)/q(uit) prompt. `_select_fields()` handles per-field toggle. Auto mode (`a`) switches off interactive for remaining files.
+- **Cache**: `load_cache()` / `save_cache()` / `is_cached()` / `update_cache()` manage `.music_tagger_cache.json` in the music directory. Uses mtime+size fingerprint to detect file changes. Skips already-processed files on repeat runs.
 - **Report**: `_write_report()` generates a text report in the music directory with per-file details and diffs.
-- **Two main paths**: `_run_cover_only_mode()` (default, legacy) and `_run_tag_mode()` (with `--tag`/`-i`). `main()` dispatches between them.
+- **Strip covers**: `_run_strip_covers()` removes embedded art with triple confirmation via `_confirm_strip()`.
+- **Three main paths**: `_run_cover_only_mode()` (default), `_run_tag_mode()` (with `--tag`/`-i`), `_run_strip_covers()` (with `--strip-covers`). `main()` dispatches between them.
 
 ## Notes
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import json
 import os
 import re
 import sys
@@ -527,6 +528,68 @@ def sanitize_filename(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Cache
+# ---------------------------------------------------------------------------
+
+CACHE_FILENAME = ".music_tagger_cache.json"
+
+
+def _file_fingerprint(filepath: str) -> str:
+    """Quick fingerprint: mtime + size. Changes when file is modified."""
+    st = os.stat(filepath)
+    return f"{st.st_mtime_ns}:{st.st_size}"
+
+
+def load_cache(directory: str) -> dict:
+    """Load cache from the music directory."""
+    cache_path = os.path.join(directory, CACHE_FILENAME)
+    if not os.path.isfile(cache_path):
+        return {}
+    try:
+        with open(cache_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_cache(directory: str, cache: dict) -> None:
+    """Save cache to the music directory."""
+    cache_path = os.path.join(directory, CACHE_FILENAME)
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=1)
+    except OSError as e:
+        print(f"  {yellow('Warning')}: could not save cache: {e}")
+
+
+def is_cached(cache: dict, filepath: str) -> bool:
+    """Check if a file is in the cache and hasn't been modified since."""
+    key = os.path.basename(filepath)
+    entry = cache.get(key)
+    if not entry:
+        return False
+    try:
+        return entry.get("fingerprint") == _file_fingerprint(filepath)
+    except OSError:
+        return False
+
+
+def update_cache(cache: dict, filepath: str, status: str, source: str = "") -> None:
+    """Mark a file as processed in the cache."""
+    key = os.path.basename(filepath)
+    try:
+        fp = _file_fingerprint(filepath)
+    except OSError:
+        return
+    cache[key] = {
+        "fingerprint": fp,
+        "status": status,
+        "source": source,
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Interactive UI
 # ---------------------------------------------------------------------------
 
@@ -727,6 +790,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Remove all embedded cover art from files (requires triple confirmation)",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Ignore cache and re-process all files",
+    )
 
     args = parser.parse_args(argv)
 
@@ -911,12 +979,24 @@ def _run_cover_only_mode(args: argparse.Namespace, audio_files: list[str]) -> in
 def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
     """Metadata tagging workflow (interactive or auto)."""
     total = len(audio_files)
-    stats = {"tagged": 0, "skipped": 0, "not_found": 0, "errors": 0, "unchanged": 0}
+    stats = {"tagged": 0, "skipped": 0, "not_found": 0, "errors": 0, "unchanged": 0,
+             "cached": 0}
     source_counts: dict[str, int] = {}
     interactive = args.interactive
     report: list[dict] = []  # Collected for report generation
 
+    # Load cache
+    use_cache = not getattr(args, "no_cache", False) and not args.dry_run
+    cache = load_cache(args.directory) if use_cache else {}
+    if use_cache and cache:
+        print(f"Cache: {len(cache)} entries loaded")
+
     for i, filepath in enumerate(audio_files, 1):
+        # Check cache — skip files already processed and unchanged
+        if use_cache and not args.force and is_cached(cache, filepath):
+            stats["cached"] += 1
+            continue
+
         parsed = parse_filename(filepath)
         if not parsed:
             print(f"[{i}/{total}] SKIP (can't parse): {os.path.basename(filepath)}")
@@ -962,6 +1042,8 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         if not result:
             print(f"  {dim('No results found (all sources exhausted)')}")
             stats["not_found"] += 1
+            if use_cache:
+                update_cache(cache, filepath, "not_found")
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
@@ -983,6 +1065,8 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         if not actionable:
             print(f"  {dim('Nothing to update')} ({source_name})")
             stats["unchanged"] += 1
+            if use_cache:
+                update_cache(cache, filepath, "unchanged", source_name)
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
@@ -1055,6 +1139,8 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             print(f"  {green('OK')} {n_changes} field(s) updated via {source_name}")
             stats["tagged"] += 1
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
+            if use_cache:
+                update_cache(cache, filepath, "tagged", source_name)
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
@@ -1073,8 +1159,14 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
                 "status": "error", "source": source_name,
             })
 
+    # Save cache
+    if use_cache and cache:
+        save_cache(args.directory, cache)
+
     # Print summary
     print(f"\n{'=== DRY RUN ===' if args.dry_run else '=== DONE ==='}")
+    if stats["cached"]:
+        print(f"  Cached:     {stats['cached']}")
     print(f"  Tagged:     {stats['tagged']}")
     if source_counts:
         for src, cnt in sorted(source_counts.items(), key=lambda x: -x[1]):

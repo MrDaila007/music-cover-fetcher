@@ -70,6 +70,12 @@ python music_cover_fetcher.py /path/to/music --resolution 1200
 
 # Use only specific sources
 python music_cover_fetcher.py /path/to/music --sources deezer,itunes
+
+# Force re-process all files (ignore cache)
+python music_cover_fetcher.py /path/to/music --tag --no-cache
+
+# Remove all embedded cover art
+python music_cover_fetcher.py /path/to/music --strip-covers
 ```
 
 ### Modes
@@ -78,6 +84,8 @@ python music_cover_fetcher.py /path/to/music --sources deezer,itunes
 - **`--tag`** — automatically fill empty metadata fields from APIs
 - **`-i` / `--interactive`** — review a table of current vs. fetched values per file; choose to apply all, select individual fields, switch to auto, or quit
 - **`--force`** — overwrite existing metadata (not just fill empty fields)
+- **`--strip-covers`** — remove all embedded cover art (requires triple confirmation)
+- **`--no-cache`** — ignore cache and re-process all files
 
 ### Interactive controls
 
@@ -99,15 +107,25 @@ tag_report_2025-03-29_14-30-00.txt
 
 The report contains a summary and per-file details: what was changed, what was skipped, and any metadata discrepancies detected between existing tags and API data.
 
+### Cache
+
+Processed files are cached in `.music_tagger_cache.json` in the music directory. On subsequent runs, files that haven't changed since last processing are skipped automatically. The cache is invalidated when a file's modification time or size changes.
+
+- `--force` ignores the cache and re-checks all files
+- `--no-cache` disables caching entirely
+- Cache is not used during `--dry-run`
+
 ## How it works
 
 1. Scans the directory for audio files
-2. Parses `Artist - Title` from each filename
-3. Builds multiple search query variations (normalized text, first artist, etc.)
-4. Tries each source in order: Deezer, iTunes, MusicBrainz
-5. Compares fetched metadata against existing file tags
-6. Fills empty fields (or overwrites with `--force`), embeds cover art
-7. Rate-limits requests to respect APIs
+2. Checks cache — skips already processed files that haven't changed
+3. Parses `Artist - Title` from each filename
+4. Builds multiple search query variations (normalized text, first artist, etc.)
+5. Tries each source in order: Deezer, iTunes, MusicBrainz
+6. Compares fetched metadata against existing file tags
+7. Fills empty fields (or overwrites with `--force`), embeds cover art
+8. Updates cache and generates a report
+9. Rate-limits requests to respect APIs
 
 ## Filename format
 
