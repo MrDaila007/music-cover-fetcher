@@ -9,6 +9,7 @@ into the file's metadata.
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import re
 import sys
@@ -576,6 +577,7 @@ def show_interactive_review(
         list[dict] — filtered list of changes to apply
         'skip' — skip this file
         'quit' — stop processing
+        'auto' — apply these changes and switch to auto mode for remaining files
     """
     source = fetched.get("_source", "?")
     print(f"  Source: {bold(source)}\n")
@@ -616,7 +618,7 @@ def show_interactive_review(
 
     while True:
         try:
-            answer = input(f"  Apply {summary}? [{bold('Y')}/n/s(elect)/q(uit)] ").strip().lower()
+            answer = input(f"  Apply {summary}? [{bold('Y')}/n/s(elect)/a(uto)/q(uit)] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print()
             return "quit"
@@ -629,8 +631,10 @@ def show_interactive_review(
             return "quit"
         elif answer in ("s", "select"):
             return _select_fields(actionable)
+        elif answer in ("a", "auto"):
+            return "auto"
         else:
-            print(f"  {dim('Enter Y, n, s, or q')}")
+            print(f"  {dim('Enter Y, n, s, a, or q')}")
 
 
 def _select_fields(actionable: list[dict]) -> list[dict] | str:
@@ -834,12 +838,19 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
     total = len(audio_files)
     stats = {"tagged": 0, "skipped": 0, "not_found": 0, "errors": 0, "unchanged": 0}
     source_counts: dict[str, int] = {}
+    interactive = args.interactive
+    report: list[dict] = []  # Collected for report generation
 
     for i, filepath in enumerate(audio_files, 1):
         parsed = parse_filename(filepath)
         if not parsed:
             print(f"[{i}/{total}] SKIP (can't parse): {os.path.basename(filepath)}")
             stats["skipped"] += 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "status": "skipped",
+                "reason": "can't parse filename",
+            })
             continue
 
         artist, title = parsed
@@ -849,18 +860,26 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         existing = read_file_metadata(filepath)
 
         if args.dry_run:
-            # In dry-run, still show what fields are empty
             empty_fields = [f for f in META_FIELDS if existing.get(f) is None]
-            if empty_fields and not existing.get("has_art"):
-                empty_fields.append("cover_art")
-            elif not existing.get("has_art"):
+            if not existing.get("has_art"):
                 empty_fields.append("cover_art")
             if empty_fields:
                 print(f"  Empty: {', '.join(empty_fields)}")
                 stats["tagged"] += 1
+                report.append({
+                    "file": os.path.basename(filepath),
+                    "artist": artist, "title": title,
+                    "status": "needs_fill",
+                    "empty_fields": empty_fields,
+                })
             else:
                 print(f"  {dim('All fields populated')}")
                 stats["unchanged"] += 1
+                report.append({
+                    "file": os.path.basename(filepath),
+                    "artist": artist, "title": title,
+                    "status": "complete",
+                })
             continue
 
         # Search for metadata
@@ -868,6 +887,11 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         if not result:
             print(f"  {dim('No results found (all sources exhausted)')}")
             stats["not_found"] += 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "artist": artist, "title": title,
+                "status": "not_found",
+            })
             continue
 
         source_name = result.get("_source", "?")
@@ -884,18 +908,36 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         if not actionable:
             print(f"  {dim('Nothing to update')} ({source_name})")
             stats["unchanged"] += 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "artist": artist, "title": title,
+                "status": "unchanged", "source": source_name,
+                "changes": changes,
+            })
             continue
 
-        if args.interactive:
+        if interactive:
             decision = show_interactive_review(filepath, existing, result, changes, args.force)
             if decision == "quit":
                 print("\nAborted by user.")
                 break
-            if decision == "skip" or not decision:
+            if decision == "auto":
+                # Apply current file's actionable changes, then switch to auto
+                print(f"  {green('Switching to auto mode for remaining files...')}")
+                interactive = False
+                to_apply = actionable
+            elif decision == "skip" or not decision:
                 print(f"  {dim('Skipped')}")
                 stats["skipped"] += 1
+                report.append({
+                    "file": os.path.basename(filepath),
+                    "artist": artist, "title": title,
+                    "status": "skipped", "reason": "user skipped",
+                    "source": source_name, "changes": changes,
+                })
                 continue
-            to_apply = decision
+            else:
+                to_apply = decision
         else:
             to_apply = actionable
             # Show summary in auto mode
@@ -919,6 +961,12 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
 
         if not meta_changes and not art_data:
             stats["unchanged"] += 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "artist": artist, "title": title,
+                "status": "unchanged", "source": source_name,
+                "changes": changes,
+            })
             continue
 
         if args.save_covers and art_data:
@@ -932,9 +980,25 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             print(f"  {green('OK')} {n_changes} field(s) updated via {source_name}")
             stats["tagged"] += 1
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "artist": artist, "title": title,
+                "status": "tagged", "source": source_name,
+                "applied": [
+                    {"field": c["field"], "action": c["action"],
+                     "old": c.get("current"), "new": c["proposed"]}
+                    for c in meta_changes
+                ] + ([{"field": "cover_art", "action": "fill"}] if art_data else []),
+            })
         else:
             stats["errors"] += 1
+            report.append({
+                "file": os.path.basename(filepath),
+                "artist": artist, "title": title,
+                "status": "error", "source": source_name,
+            })
 
+    # Print summary
     print(f"\n{'=== DRY RUN ===' if args.dry_run else '=== DONE ==='}")
     print(f"  Tagged:     {stats['tagged']}")
     if source_counts:
@@ -946,7 +1010,83 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
     print(f"  Skipped:    {stats['skipped']}")
     print(f"  Total:      {total}")
 
+    # Generate report
+    if report:
+        report_path = _write_report(args.directory, report, stats, source_counts, args.dry_run)
+        print(f"\n  Report: {report_path}")
+
     return 0
+
+
+def _write_report(
+    directory: str,
+    report: list[dict],
+    stats: dict,
+    source_counts: dict[str, int],
+    dry_run: bool,
+) -> str:
+    """Write a detailed report file to the music directory root."""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    prefix = "dryrun_" if dry_run else ""
+    report_name = f"{prefix}tag_report_{timestamp}.txt"
+    report_path = os.path.join(directory, report_name)
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(f"Music Tagger Report — {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        if dry_run:
+            f.write("MODE: DRY RUN (no changes applied)\n")
+        f.write(f"Directory: {directory}\n")
+        f.write("=" * 70 + "\n\n")
+
+        # Summary
+        f.write("SUMMARY\n")
+        f.write("-" * 40 + "\n")
+        for key, val in stats.items():
+            f.write(f"  {key:<12} {val}\n")
+        if source_counts:
+            f.write("\n  Sources:\n")
+            for src, cnt in sorted(source_counts.items(), key=lambda x: -x[1]):
+                f.write(f"    {src}: {cnt}\n")
+        f.write("\n" + "=" * 70 + "\n\n")
+
+        # Per-file details
+        f.write("DETAILS\n")
+        f.write("-" * 40 + "\n\n")
+
+        for entry in report:
+            filename = entry["file"]
+            status = entry["status"].upper()
+            f.write(f"  [{status}] {filename}\n")
+
+            if entry.get("source"):
+                f.write(f"    Source: {entry['source']}\n")
+
+            if entry.get("reason"):
+                f.write(f"    Reason: {entry['reason']}\n")
+
+            if entry.get("empty_fields"):
+                f.write(f"    Empty fields: {', '.join(entry['empty_fields'])}\n")
+
+            if entry.get("applied"):
+                for ch in entry["applied"]:
+                    field = _FIELD_LABELS.get(ch["field"], ch["field"])
+                    if ch.get("old") is not None:
+                        f.write(f"    {ch['action']:>9} {field}: {ch['old']} -> {ch.get('new', '')}\n")
+                    else:
+                        f.write(f"    {ch['action']:>9} {field}: {ch.get('new', '')}\n")
+
+            # Show diffs for unchanged/skipped files that have change data
+            if entry.get("changes") and entry["status"] in ("unchanged", "skipped"):
+                diffs = [c for c in entry["changes"] if c["action"] == "overwrite"]
+                if diffs:
+                    f.write("    Diffs detected (not applied):\n")
+                    for c in diffs:
+                        label = _FIELD_LABELS.get(c["field"], c["field"])
+                        f.write(f"      {label}: {c['current']} vs {c['proposed']}\n")
+
+            f.write("\n")
+
+    return report_path
 
 
 if __name__ == "__main__":

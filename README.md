@@ -76,8 +76,28 @@ python music_cover_fetcher.py /path/to/music --sources deezer,itunes
 
 - **Default** (no flags) — cover art only, same as before
 - **`--tag`** — automatically fill empty metadata fields from APIs
-- **`-i` / `--interactive`** — review a table of current vs. fetched values per file; choose to apply all, select individual fields, skip, or quit
+- **`-i` / `--interactive`** — review a table of current vs. fetched values per file; choose to apply all, select individual fields, switch to auto, or quit
 - **`--force`** — overwrite existing metadata (not just fill empty fields)
+
+### Interactive controls
+
+| Key | Action |
+|-----|--------|
+| `Y` (default) | Apply all proposed changes for this file |
+| `n` | Skip this file |
+| `s` | Select individual fields to apply |
+| `a` | Switch to auto mode — apply current file and all remaining automatically |
+| `q` | Quit processing |
+
+### Reports
+
+When running with `--tag` or `-i`, a report file is generated in the music directory after processing:
+
+```
+tag_report_2025-03-29_14-30-00.txt
+```
+
+The report contains a summary and per-file details: what was changed, what was skipped, and any metadata discrepancies detected between existing tags and API data.
 
 ## How it works
 
