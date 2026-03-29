@@ -1,8 +1,8 @@
 # music-cover-fetcher
 
-Fetch and embed album cover art for music files using multiple sources.
+Fetch and embed album cover art and metadata for music files using multiple sources.
 
-Parses artist and title from filenames (`Artist - Title.mp3`), searches multiple APIs for matching cover art, and embeds it directly into the file's tags.
+Parses artist and title from filenames (`Artist - Title.mp3`), searches multiple APIs for matching data, and embeds artwork and metadata directly into the file's tags.
 
 ## Sources
 
@@ -13,6 +13,23 @@ Searches are tried in order until a match is found:
 3. **MusicBrainz / Cover Art Archive** — open database, good for less common releases
 
 Each source is tried with multiple query variations (normalized text, first artist only, etc.) to maximize hit rate.
+
+## Metadata fields
+
+When using `--tag` or `-i`, the following fields are filled from API data:
+
+| Field | Deezer | iTunes | MusicBrainz |
+|-------|--------|--------|-------------|
+| Title | + | + | + |
+| Artist | + | + | + |
+| Album | + | + | + |
+| Genre | - | + | - |
+| Year | - | + | + |
+| Track / Total | + | + | - |
+| Disc / Total | + | + | - |
+| BPM | + | - | - |
+| ISRC | + | - | + |
+| Cover Art | + | + | + |
 
 ## Supported formats
 
@@ -27,17 +44,23 @@ pip install requests mediafile
 ## Usage
 
 ```bash
-# Fetch covers for all music files in a directory
+# Fetch covers for all music files in a directory (original behavior)
 python music_cover_fetcher.py /path/to/music
 
-# Preview what would be done
-python music_cover_fetcher.py /path/to/music --dry-run
+# Fill empty metadata fields automatically
+python music_cover_fetcher.py /path/to/music --tag
 
-# Re-fetch covers even for files that already have art
-python music_cover_fetcher.py /path/to/music --force
+# Interactive mode: review each change before applying
+python music_cover_fetcher.py /path/to/music -i
+
+# Interactive mode with overwrite of existing fields
+python music_cover_fetcher.py /path/to/music -i --force
+
+# Preview what would be done
+python music_cover_fetcher.py /path/to/music --tag --dry-run
 
 # Search subdirectories recursively
-python music_cover_fetcher.py /path/to/music --recursive
+python music_cover_fetcher.py /path/to/music -i --recursive
 
 # Save cover images to a separate folder
 python music_cover_fetcher.py /path/to/music --save-covers ./covers
@@ -49,14 +72,22 @@ python music_cover_fetcher.py /path/to/music --resolution 1200
 python music_cover_fetcher.py /path/to/music --sources deezer,itunes
 ```
 
+### Modes
+
+- **Default** (no flags) — cover art only, same as before
+- **`--tag`** — automatically fill empty metadata fields from APIs
+- **`-i` / `--interactive`** — review a table of current vs. fetched values per file; choose to apply all, select individual fields, skip, or quit
+- **`--force`** — overwrite existing metadata (not just fill empty fields)
+
 ## How it works
 
 1. Scans the directory for audio files
 2. Parses `Artist - Title` from each filename
 3. Builds multiple search query variations (normalized text, first artist, etc.)
 4. Tries each source in order: Deezer, iTunes, MusicBrainz
-5. Downloads the first match and embeds it into the file's metadata
-6. Rate-limits requests to respect APIs
+5. Compares fetched metadata against existing file tags
+6. Fills empty fields (or overwrites with `--force`), embeds cover art
+7. Rate-limits requests to respect APIs
 
 ## Filename format
 
