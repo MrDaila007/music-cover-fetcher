@@ -1,24 +1,38 @@
-"""Fetch and embed album cover art for MP3 files using iTunes Search API.
+"""Fetch and embed album cover art for music files.
 
-Searches iTunes for cover art matching each MP3's artist and title (parsed
-from the filename pattern "Artist - Title.mp3"), then downloads and embeds the
-artwork directly into the file's ID3 tags.
+Searches multiple sources (Deezer, iTunes, MusicBrainz) for cover art matching
+each file's artist and title (parsed from the filename pattern
+"Artist - Title.mp3"), then downloads and embeds the artwork directly into the
+file's metadata tags.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
+import unicodedata
 
 import requests
 from mediafile import MediaFile
 
-ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
 SUPPORTED_EXTENSIONS = {".mp3", ".m4a", ".flac", ".ogg", ".opus", ".wma", ".wav"}
 RATE_LIMIT_SECONDS = 0.3
 MIN_IMAGE_SIZE = 1000  # bytes
+
+
+# ---------------------------------------------------------------------------
+# Filename parsing
+# ---------------------------------------------------------------------------
+
+def normalize_text(text: str) -> str:
+    """Normalize unicode characters for better search matching."""
+    # Replace common unicode lookalikes with ASCII
+    text = unicodedata.normalize("NFKD", text)
+    # Remove combining characters but keep base letters
+    return "".join(c for c in text if not unicodedata.combining(c))
 
 
 def parse_filename(filepath: str) -> tuple[str, str] | None:
@@ -37,15 +51,88 @@ def parse_filename(filepath: str) -> tuple[str, str] | None:
     return artist.strip(), clean_title or title.strip()
 
 
-def search_itunes(
-    artist: str, title: str, resolution: int = 600
-) -> str | None:
-    """Search iTunes for cover art URL. Returns high-res image URL or None."""
+def build_search_queries(artist: str, title: str) -> list[tuple[str, str]]:
+    """Build multiple search query variations for better hit rate."""
+    queries = [(artist, title)]
+
+    # Try with normalized text (strips accents/special chars)
+    norm_artist = normalize_text(artist)
+    norm_title = normalize_text(title)
+    if (norm_artist, norm_title) != (artist, title):
+        queries.append((norm_artist, norm_title))
+
+    # If artist has commas (multiple artists), try first artist only
+    if "," in artist:
+        first_artist = artist.split(",")[0].strip()
+        queries.append((first_artist, title))
+
+    # Strip "x" mashup separator
+    if " x " in artist.lower() or " х " in artist.lower():
+        first = re.split(r" [xх] ", artist, flags=re.IGNORECASE)[0].strip()
+        queries.append((first, title))
+
+    # Try artist-only search for very niche titles
+    queries.append((artist, ""))
+
+    return queries
+
+
+# ---------------------------------------------------------------------------
+# Cover art sources
+# ---------------------------------------------------------------------------
+
+def search_deezer(artist: str, title: str, resolution: int = 500) -> str | None:
+    """Search Deezer API for cover art. Free, no API key needed."""
+    query = f"{artist} {title}".strip()
+    if not query:
+        return None
     try:
         resp = requests.get(
-            ITUNES_SEARCH_URL,
+            "https://api.deezer.com/search",
+            params={"q": query, "limit": 5},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    results = data.get("data", [])
+    if not results:
+        return None
+
+    artist_lower = artist.lower()
+    title_lower = title.lower()
+    best = None
+
+    for r in results:
+        r_artist = r.get("artist", {}).get("name", "").lower()
+        r_track = r.get("title", "").lower()
+        album = r.get("album", {})
+        art_url = album.get("cover_xl") or album.get("cover_big") or album.get("cover_medium")
+        if not art_url:
+            continue
+        if artist_lower in r_artist or r_artist in artist_lower:
+            if title_lower in r_track or r_track in title_lower:
+                return art_url
+            if best is None:
+                best = art_url
+        elif best is None:
+            best = art_url
+
+    return best
+
+
+def search_itunes(artist: str, title: str, resolution: int = 600) -> str | None:
+    """Search iTunes for cover art URL."""
+    query = f"{artist} {title}".strip()
+    if not query:
+        return None
+    try:
+        resp = requests.get(
+            "https://itunes.apple.com/search",
             params={
-                "term": f"{artist} {title}",
+                "term": query,
                 "entity": "song",
                 "media": "music",
                 "limit": 5,
@@ -82,6 +169,73 @@ def search_itunes(
 
     return best
 
+
+def search_musicbrainz(artist: str, title: str) -> str | None:
+    """Search MusicBrainz for the recording, then fetch cover from Cover Art Archive."""
+    query = f'artist:"{artist}" AND recording:"{title}"'
+    try:
+        resp = requests.get(
+            "https://musicbrainz.org/ws/2/recording",
+            params={"query": query, "limit": 5, "fmt": "json"},
+            headers={"User-Agent": "MusicCoverFetcher/0.1.0 (github.com/MrDaila007/music-cover-fetcher)"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    recordings = data.get("recordings", [])
+    for rec in recordings:
+        for release in rec.get("releases", []):
+            release_id = release.get("id")
+            if not release_id:
+                continue
+            # Try Cover Art Archive
+            try:
+                caa_resp = requests.get(
+                    f"https://coverartarchive.org/release/{release_id}/front-500",
+                    timeout=10,
+                    allow_redirects=True,
+                )
+                if caa_resp.status_code == 200 and len(caa_resp.content) > MIN_IMAGE_SIZE:
+                    return caa_resp.url
+            except requests.RequestException:
+                continue
+
+    return None
+
+
+# Source registry: (name, function) in priority order
+SOURCES = [
+    ("Deezer", search_deezer),
+    ("iTunes", search_itunes),
+    ("MusicBrainz", search_musicbrainz),
+]
+
+
+def search_all_sources(
+    artist: str, title: str, resolution: int = 600
+) -> tuple[str | None, str]:
+    """Try all sources with multiple query variations. Returns (url, source_name)."""
+    queries = build_search_queries(artist, title)
+
+    for source_name, search_fn in SOURCES:
+        for q_artist, q_title in queries:
+            if source_name == "MusicBrainz":
+                art_url = search_fn(q_artist, q_title)
+            else:
+                art_url = search_fn(q_artist, q_title, resolution)
+            if art_url:
+                return art_url, source_name
+            time.sleep(RATE_LIMIT_SECONDS)
+
+    return None, ""
+
+
+# ---------------------------------------------------------------------------
+# File operations
+# ---------------------------------------------------------------------------
 
 def has_embedded_art(filepath: str) -> bool:
     """Check if file already has embedded cover art."""
@@ -132,6 +286,17 @@ def collect_audio_files(directory: str, recursive: bool = False) -> list[str]:
     return sorted(files)
 
 
+def sanitize_filename(name: str) -> str:
+    """Remove characters that are invalid in filenames."""
+    for ch in '/\\:*?"<>|':
+        name = name.replace(ch, "_")
+    return name
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fetch and embed album cover art for music files."
@@ -166,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         default=600,
         help="Cover art resolution in pixels (default: 600)",
     )
+    parser.add_argument(
+        "--sources",
+        default="deezer,itunes,musicbrainz",
+        help="Comma-separated list of sources to use (default: deezer,itunes,musicbrainz)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -173,12 +343,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: '{args.directory}' is not a directory")
         return 1
 
+    # Filter sources based on --sources flag
+    enabled = {s.strip().lower() for s in args.sources.split(",")}
+    global SOURCES
+    SOURCES = [(n, fn) for n, fn in SOURCES if n.lower() in enabled]
+    if not SOURCES:
+        print(f"Error: no valid sources in '{args.sources}'")
+        print("Available: deezer, itunes, musicbrainz")
+        return 1
+
+    print(f"Sources: {', '.join(n for n, _ in SOURCES)}")
+
     if args.save_covers:
         os.makedirs(args.save_covers, exist_ok=True)
 
     audio_files = collect_audio_files(args.directory, args.recursive)
     total = len(audio_files)
-    print(f"Found {total} audio files")
+    print(f"Found {total} audio files\n")
 
     if total == 0:
         return 0
@@ -188,6 +369,7 @@ def main(argv: list[str] | None = None) -> int:
     failed = 0
     already_has_art = 0
     errors = 0
+    source_counts: dict[str, int] = {}
 
     for i, filepath in enumerate(audio_files, 1):
         parsed = parse_filename(filepath)
@@ -208,39 +390,37 @@ def main(argv: list[str] | None = None) -> int:
             found += 1
             continue
 
-        art_url = search_itunes(artist, title, args.resolution)
+        art_url, source_name = search_all_sources(artist, title, args.resolution)
         if not art_url:
-            print("    No cover found")
+            print("    No cover found (all sources exhausted)")
             failed += 1
-            time.sleep(RATE_LIMIT_SECONDS)
             continue
 
         image_data = download_image(art_url)
         if not image_data:
-            print("    Download failed")
+            print(f"    Download failed ({source_name})")
             failed += 1
-            time.sleep(RATE_LIMIT_SECONDS)
             continue
 
         if args.save_covers:
-            safe_name = f"{artist} - {title}"[:80]
-            for ch in '/\\:*?"<>|':
-                safe_name = safe_name.replace(ch, "_")
+            safe_name = sanitize_filename(f"{artist} - {title}"[:80])
             cover_path = os.path.join(args.save_covers, f"{safe_name}.jpg")
             with open(cover_path, "wb") as f:
                 f.write(image_data)
 
         if embed_art(filepath, image_data):
-            print(f"    OK ({len(image_data) // 1024}KB)")
+            print(f"    OK via {source_name} ({len(image_data) // 1024}KB)")
             found += 1
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
         else:
             errors += 1
-
-        time.sleep(RATE_LIMIT_SECONDS)
 
     print(f"\n{'=== DRY RUN ===' if args.dry_run else '=== DONE ==='}")
     print(f"  Already had art: {already_has_art}")
     print(f"  Covers fetched:  {found}")
+    if source_counts:
+        for src, cnt in sorted(source_counts.items(), key=lambda x: -x[1]):
+            print(f"    {src}: {cnt}")
     print(f"  Not found:       {failed}")
     print(f"  Errors:          {errors}")
     print(f"  Skipped:         {skipped}")
