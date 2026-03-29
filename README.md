@@ -1,8 +1,8 @@
 # music-cover-fetcher
 
-Fetch and embed album cover art and metadata for music files using multiple sources.
+Auto-tag your music library — fetches cover art, album, genre, year, track numbers and more from Deezer, iTunes & MusicBrainz.
 
-Parses artist and title from filenames (`Artist - Title.mp3`), searches multiple APIs for matching data, and embeds artwork and metadata directly into the file's tags.
+Parses `Artist - Title` from filenames, searches multiple APIs, and embeds artwork and metadata directly into file tags. Supports interactive review, smart caching, and detailed reports.
 
 ## Sources
 
