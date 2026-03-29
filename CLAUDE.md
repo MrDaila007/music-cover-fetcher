@@ -6,30 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Single-file Python CLI tool that fetches album cover art and metadata from multiple APIs (Deezer, iTunes, MusicBrainz/Cover Art Archive) and embeds them into audio file tags. Parses `Artist - Title` from filenames.
 
-## Running
+## Setup & Running
 
 ```bash
-# Cover art only (default)
-python music_cover_fetcher.py /path/to/music
+# Quick setup (Windows) — creates venv, installs deps
+setup.bat
 
-# Auto-fill empty metadata fields
-python music_cover_fetcher.py /path/to/music --tag
+# Run via wrapper
+run.bat C:\Music -i
 
-# Interactive mode: review changes per file (implies --tag)
+# Or via Make
+make setup
+make interactive MUSIC=C:\Music
+
+# Or directly
 python music_cover_fetcher.py /path/to/music -i
-
-# Force overwrite existing fields
-python music_cover_fetcher.py /path/to/music -i --force
-
-# Dry run, recursive, limit sources
-python music_cover_fetcher.py /path/to/music --tag --dry-run --recursive --sources deezer,itunes
-
-# Ignore cache, re-process everything
-python music_cover_fetcher.py /path/to/music --tag --no-cache
-
-# Remove all embedded cover art (triple confirmation)
-python music_cover_fetcher.py /path/to/music --strip-covers
 ```
+
+Key flags: `--tag`, `-i`, `--force`, `--dry-run`, `--recursive`, `--sources`, `--no-cache`, `--strip-covers`, `--resolution`, `--save-covers`.
 
 ## Dependencies
 
@@ -38,6 +32,13 @@ pip install requests mediafile
 ```
 
 Requires Python >=3.10 (uses `X | Y` union types).
+
+## Project Files
+
+- `music_cover_fetcher.py` — all application logic (single file)
+- `setup.bat` — Windows venv setup script
+- `run.bat` — Windows run wrapper (uses venv)
+- `Makefile` — Make targets for setup/run/clean
 
 ## Architecture
 
@@ -49,7 +50,7 @@ Everything lives in `music_cover_fetcher.py`. Key structure:
 - **`_match_score()`**: shared artist/title fuzzy matching used by all source functions to rank API results.
 - **Metadata operations**: `read_file_metadata()` reads current tags, `compute_changes()` diffs existing vs fetched (fill/overwrite/match/skip), `apply_metadata()` writes changes via MediaFile.
 - **Interactive UI**: `show_interactive_review()` displays a colored diff table with Y/n/s(elect)/a(uto)/q(uit) prompt. `_select_fields()` handles per-field toggle. Auto mode (`a`) switches off interactive for remaining files.
-- **Cache**: `load_cache()` / `save_cache()` / `is_cached()` / `update_cache()` manage `.music_tagger_cache.json` in the music directory. Uses mtime+size fingerprint to detect file changes. Skips already-processed files on repeat runs.
+- **Cache**: `load_cache()` / `save_cache()` / `is_cached()` / `cache_metadata_matches()` / `update_cache()` manage `.music_tagger_cache.json` in the music directory. Stores full `file_metadata` and `fetched_metadata` per file. Uses mtime+size fingerprint for quick checks, then compares stored metadata against current file tags to detect external edits.
 - **Report**: `_write_report()` generates a text report in the music directory with per-file details and diffs.
 - **Strip covers**: `_run_strip_covers()` removes embedded art with triple confirmation via `_confirm_strip()`.
 - **Three main paths**: `_run_cover_only_mode()` (default), `_run_tag_mode()` (with `--tag`/`-i`), `_run_strip_covers()` (with `--strip-covers`). `main()` dispatches between them.

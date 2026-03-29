@@ -7,3 +7,5 @@ build/
 *.jpg
 *.png
 covers/
+.music_tagger_cache.json
+tag_report_*.txt

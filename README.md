@@ -35,47 +35,73 @@ When using `--tag` or `-i`, the following fields are filled from API data:
 
 MP3, M4A, FLAC, OGG, Opus, WMA, WAV
 
+## Quick start (Windows)
+
+```bat
+setup.bat
+run.bat C:\Music -i
+```
+
 ## Installation
+
+### With venv (recommended)
+
+```bash
+# Windows
+setup.bat
+
+# Or manually
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+```
+
+### Without venv
 
 ```bash
 pip install requests mediafile
 ```
 
-## Usage
+### With Make
 
 ```bash
-# Fetch covers for all music files in a directory (original behavior)
-python music_cover_fetcher.py /path/to/music
+make setup
+```
 
-# Fill empty metadata fields automatically
-python music_cover_fetcher.py /path/to/music --tag
+## Usage
 
-# Interactive mode: review each change before applying
-python music_cover_fetcher.py /path/to/music -i
+### Via run.bat (Windows)
 
-# Interactive mode with overwrite of existing fields
-python music_cover_fetcher.py /path/to/music -i --force
+```bat
+run.bat C:\Music                     # cover art only
+run.bat C:\Music --tag               # auto-fill metadata
+run.bat C:\Music -i                  # interactive mode
+run.bat C:\Music --strip-covers      # remove all covers
+```
 
-# Preview what would be done
-python music_cover_fetcher.py /path/to/music --tag --dry-run
+### Via Make
 
-# Search subdirectories recursively
-python music_cover_fetcher.py /path/to/music -i --recursive
+```bash
+make tag MUSIC=C:\Music              # auto-fill metadata
+make interactive MUSIC=C:\Music      # interactive mode
+make dry-run MUSIC=C:\Music          # preview changes
+make strip-covers MUSIC=C:\Music     # remove all covers
+```
 
-# Save cover images to a separate folder
+### Direct
+
+```bash
+python music_cover_fetcher.py /path/to/music              # cover art only
+python music_cover_fetcher.py /path/to/music --tag         # auto-fill metadata
+python music_cover_fetcher.py /path/to/music -i            # interactive mode
+python music_cover_fetcher.py /path/to/music -i --force    # overwrite existing fields
+python music_cover_fetcher.py /path/to/music --tag --dry-run       # preview
+python music_cover_fetcher.py /path/to/music -i --recursive        # search subdirs
 python music_cover_fetcher.py /path/to/music --save-covers ./covers
-
-# Use higher resolution artwork (default: 600px)
 python music_cover_fetcher.py /path/to/music --resolution 1200
-
-# Use only specific sources
 python music_cover_fetcher.py /path/to/music --sources deezer,itunes
-
-# Force re-process all files (ignore cache)
-python music_cover_fetcher.py /path/to/music --tag --no-cache
-
-# Remove all embedded cover art
-python music_cover_fetcher.py /path/to/music --strip-covers
+python music_cover_fetcher.py /path/to/music --tag --no-cache      # ignore cache
+python music_cover_fetcher.py /path/to/music --strip-covers        # remove covers
 ```
 
 ### Modes
