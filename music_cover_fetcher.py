@@ -154,7 +154,7 @@ def search_deezer(artist: str, title: str, resolution: int = 500) -> dict | None
     try:
         resp = requests.get(
             "https://api.deezer.com/search",
-            params={"q": query, "limit": 5},
+            params={"q": query, "limit": "5"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -209,7 +209,7 @@ def search_itunes(artist: str, title: str, resolution: int = 600) -> dict | None
     try:
         resp = requests.get(
             "https://itunes.apple.com/search",
-            params={"term": query, "entity": "song", "media": "music", "limit": 5},
+            params={"term": query, "entity": "song", "media": "music", "limit": "5"},
             timeout=10,
         )
         resp.raise_for_status()
@@ -265,13 +265,13 @@ def search_itunes(artist: str, title: str, resolution: int = 600) -> dict | None
     return best
 
 
-def search_musicbrainz(artist: str, title: str, **_kwargs: object) -> dict | None:
+def search_musicbrainz(artist: str, title: str, resolution: int = 0) -> dict | None:
     """Search MusicBrainz. Returns metadata dict or None."""
     query = f'artist:"{artist}" AND recording:"{title}"'
     try:
         resp = requests.get(
             "https://musicbrainz.org/ws/2/recording",
-            params={"query": query, "limit": 5, "fmt": "json"},
+            params={"query": query, "limit": "5", "fmt": "json"},
             headers={"User-Agent": "MusicCoverFetcher/0.1.0 (github.com/MrDaila007/music-cover-fetcher)"},
             timeout=10,
         )
@@ -365,10 +365,7 @@ def search_all_sources(
 
     for source_name, search_fn in SOURCES:
         for q_artist, q_title in queries:
-            if source_name == "MusicBrainz":
-                result = search_fn(q_artist, q_title)
-            else:
-                result = search_fn(q_artist, q_title, resolution)
+            result = search_fn(q_artist, q_title, resolution)
             if result:
                 if not metadata_mode:
                     return result
@@ -478,10 +475,9 @@ def _values_match(field: str, current: object, proposed: object) -> bool:
     if isinstance(current, str) and isinstance(proposed, str):
         return current.strip().lower() == proposed.strip().lower()
     # Compare numbers
-    try:
-        return int(current) == int(proposed)  # type: ignore[arg-type]
-    except (ValueError, TypeError):
-        return False
+    if isinstance(current, (int, float)) and isinstance(proposed, (int, float)):
+        return int(current) == int(proposed)
+    return False
 
 
 def apply_metadata(filepath: str, changes: list[dict], art_data: bytes | None = None) -> bool:
@@ -561,14 +557,15 @@ def _file_fingerprint(filepath: str) -> str:
     return f"{st.st_mtime_ns}:{st.st_size}"
 
 
-def load_cache(directory: str) -> dict:
+def load_cache(directory: str) -> dict[str, dict]:
     """Load cache from the music directory."""
     cache_path = os.path.join(directory, CACHE_FILENAME)
     if not os.path.isfile(cache_path):
         return {}
     try:
         with open(cache_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data: dict[str, dict] = json.load(f)
+            return data
     except (json.JSONDecodeError, OSError):
         return {}
 
@@ -583,7 +580,7 @@ def save_cache(directory: str, cache: dict) -> None:
         print(f"  {yellow('Warning')}: could not save cache: {e}")
 
 
-def get_cache_entry(cache: dict, filepath: str) -> dict | None:
+def get_cache_entry(cache: dict[str, dict], filepath: str) -> dict | None:
     """Get cache entry for a file, or None if not cached / stale."""
     key = os.path.basename(filepath)
     entry = cache.get(key)
@@ -1195,8 +1192,10 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
                     }
                 )
                 continue
-            else:
+            elif isinstance(decision, list):
                 to_apply = decision
+            else:
+                to_apply = actionable
         else:
             to_apply = actionable
             # Show summary in auto mode
@@ -1371,5 +1370,6 @@ def _write_report(
 
 
 if __name__ == "__main__":
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     raise SystemExit(main())
