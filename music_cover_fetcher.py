@@ -562,31 +562,88 @@ def save_cache(directory: str, cache: dict) -> None:
         print(f"  {yellow('Warning')}: could not save cache: {e}")
 
 
-def is_cached(cache: dict, filepath: str) -> bool:
-    """Check if a file is in the cache and hasn't been modified since."""
+def get_cache_entry(cache: dict, filepath: str) -> dict | None:
+    """Get cache entry for a file, or None if not cached / stale."""
     key = os.path.basename(filepath)
     entry = cache.get(key)
     if not entry:
-        return False
+        return None
     try:
-        return entry.get("fingerprint") == _file_fingerprint(filepath)
+        if entry.get("fingerprint") != _file_fingerprint(filepath):
+            return None  # File changed on disk
     except OSError:
+        return None
+    return entry
+
+
+def is_cached(cache: dict, filepath: str) -> bool:
+    """Check if a file is in the cache and hasn't been modified since."""
+    return get_cache_entry(cache, filepath) is not None
+
+
+def cache_metadata_matches(cache: dict, filepath: str) -> bool:
+    """Check if file's current metadata matches what's stored in cache.
+
+    Returns True if all cached metadata values still match the file.
+    Returns False if anything changed (user edited tags externally, etc.).
+    """
+    entry = get_cache_entry(cache, filepath)
+    if not entry:
         return False
+    cached_meta = entry.get("file_metadata")
+    if not cached_meta:
+        return False
+    current = read_file_metadata(filepath)
+    for field in META_FIELDS:
+        cached_val = cached_meta.get(field)
+        current_val = current.get(field)
+        if cached_val != current_val:
+            # Normalize comparison for numbers stored as strings in JSON
+            try:
+                if cached_val is not None and current_val is not None:
+                    if int(cached_val) == int(current_val):
+                        continue
+            except (ValueError, TypeError):
+                pass
+            return False
+    return True
 
 
-def update_cache(cache: dict, filepath: str, status: str, source: str = "") -> None:
-    """Mark a file as processed in the cache."""
+def update_cache(
+    cache: dict,
+    filepath: str,
+    status: str,
+    source: str = "",
+    fetched: dict | None = None,
+    file_metadata: dict | None = None,
+) -> None:
+    """Mark a file as processed in the cache with full metadata."""
     key = os.path.basename(filepath)
     try:
         fp = _file_fingerprint(filepath)
     except OSError:
         return
-    cache[key] = {
+
+    entry: dict = {
         "fingerprint": fp,
         "status": status,
         "source": source,
         "timestamp": datetime.datetime.now().isoformat(),
     }
+
+    # Store current file metadata for future comparison
+    if file_metadata:
+        entry["file_metadata"] = {
+            f: file_metadata.get(f) for f in META_FIELDS
+        }
+
+    # Store what the API returned
+    if fetched:
+        entry["fetched_metadata"] = {
+            f: fetched.get(f) for f in META_FIELDS
+        }
+
+    cache[key] = entry
 
 
 # ---------------------------------------------------------------------------
@@ -992,10 +1049,12 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
         print(f"Cache: {len(cache)} entries loaded")
 
     for i, filepath in enumerate(audio_files, 1):
-        # Check cache — skip files already processed and unchanged
+        # Check cache — skip files already processed and metadata unchanged
         if use_cache and not args.force and is_cached(cache, filepath):
-            stats["cached"] += 1
-            continue
+            if cache_metadata_matches(cache, filepath):
+                stats["cached"] += 1
+                continue
+            # File on disk matches fingerprint but metadata differs — re-process
 
         parsed = parse_filename(filepath)
         if not parsed:
@@ -1043,7 +1102,7 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             print(f"  {dim('No results found (all sources exhausted)')}")
             stats["not_found"] += 1
             if use_cache:
-                update_cache(cache, filepath, "not_found")
+                update_cache(cache, filepath, "not_found", file_metadata=existing)
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
@@ -1066,7 +1125,8 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             print(f"  {dim('Nothing to update')} ({source_name})")
             stats["unchanged"] += 1
             if use_cache:
-                update_cache(cache, filepath, "unchanged", source_name)
+                update_cache(cache, filepath, "unchanged", source_name,
+                             fetched=result, file_metadata=existing)
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
@@ -1140,7 +1200,10 @@ def _run_tag_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
             stats["tagged"] += 1
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
             if use_cache:
-                update_cache(cache, filepath, "tagged", source_name)
+                # Re-read metadata after save so fingerprint and values reflect new state
+                updated_meta = read_file_metadata(filepath)
+                update_cache(cache, filepath, "tagged", source_name,
+                             fetched=result, file_metadata=updated_meta)
             report.append({
                 "file": os.path.basename(filepath),
                 "artist": artist, "title": title,
