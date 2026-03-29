@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -e .
+          pip install .
           pip install ruff mypy types-requests
 
       - name: Ruff lint
@@ -49,7 +49,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -e .
+          pip install .
 
       - name: Smoke test - help
         run: python music_cover_fetcher.py --help
