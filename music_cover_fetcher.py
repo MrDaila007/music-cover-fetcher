@@ -722,6 +722,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Interactive mode: review and confirm each change (implies --tag)",
     )
+    parser.add_argument(
+        "--strip-covers",
+        action="store_true",
+        help="Remove all embedded cover art from files (requires triple confirmation)",
+    )
 
     args = parser.parse_args(argv)
 
@@ -732,6 +737,16 @@ def main(argv: list[str] | None = None) -> int:
     if not os.path.isdir(args.directory):
         print(f"Error: '{args.directory}' is not a directory")
         return 1
+
+    audio_files = collect_audio_files(args.directory, getattr(args, "recursive", False))
+    total = len(audio_files)
+
+    # Strip covers mode — separate path, no API calls needed
+    if args.strip_covers:
+        print(f"Found {total} audio files\n")
+        if total == 0:
+            return 0
+        return _run_strip_covers(args, audio_files)
 
     # Filter sources based on --sources flag
     enabled = {s.strip().lower() for s in args.sources.split(",")}
@@ -749,8 +764,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.save_covers:
         os.makedirs(args.save_covers, exist_ok=True)
 
-    audio_files = collect_audio_files(args.directory, args.recursive)
-    total = len(audio_files)
     print(f"Found {total} audio files\n")
 
     if total == 0:
@@ -760,6 +773,68 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tag_mode(args, audio_files)
     else:
         return _run_cover_only_mode(args, audio_files)
+
+
+def _confirm_strip(prompt: str) -> bool:
+    """Ask user for confirmation. Returns True only on explicit 'yes'."""
+    try:
+        answer = input(prompt).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    return answer == "yes"
+
+
+def _run_strip_covers(args: argparse.Namespace, audio_files: list[str]) -> int:
+    """Remove embedded cover art from all files with triple confirmation."""
+    # Count files that actually have art
+    with_art = []
+    for filepath in audio_files:
+        if has_embedded_art(filepath):
+            with_art.append(filepath)
+
+    if not with_art:
+        print("No files with embedded cover art found.")
+        return 0
+
+    print(f"{red(f'WARNING: This will remove cover art from {len(with_art)} file(s).')}\n")
+
+    # Confirmation 1
+    if not _confirm_strip(f"  [{bold('1/3')}] Remove cover art from {len(with_art)} files? Type {bold('yes')} to continue: "):
+        print("Aborted.")
+        return 0
+
+    # Confirmation 2
+    if not _confirm_strip(f"  [{bold('2/3')}] This action is irreversible. Are you sure? Type {bold('yes')} to continue: "):
+        print("Aborted.")
+        return 0
+
+    # Confirmation 3
+    if not _confirm_strip(f"  [{bold('3/3')}] Last chance. Confirm removal? Type {bold('yes')} to proceed: "):
+        print("Aborted.")
+        return 0
+
+    print()
+
+    removed = 0
+    errors = 0
+    for i, filepath in enumerate(with_art, 1):
+        name = os.path.basename(filepath)
+        try:
+            mf = MediaFile(filepath)
+            mf.art = None
+            mf.save()
+            print(f"  [{i}/{len(with_art)}] {green('Stripped')} {name}")
+            removed += 1
+        except Exception as e:
+            print(f"  [{i}/{len(with_art)}] {red('ERROR')} {name}: {e}")
+            errors += 1
+
+    print(f"\n=== DONE ===")
+    print(f"  Removed: {removed}")
+    print(f"  Errors:  {errors}")
+    print(f"  Total:   {len(with_art)}")
+    return 0
 
 
 def _run_cover_only_mode(args: argparse.Namespace, audio_files: list[str]) -> int:
